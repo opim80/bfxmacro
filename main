@@ -1,1 +1,300 @@
-a
+#SingleInstance Force
+#Persistent
+SetBatchLines, -1
+
+; =====================
+; SETTINGS
+; =====================
+ScriptFile := A_ScriptFullPath
+ScriptDir := A_ScriptDir
+VersionFile := ScriptDir "\version.txt"
+GitHubAPI := "https://api.github.com/repos/opim80/bfxmacro/commits?path=main/main"
+RawURL := "https://raw.githubusercontent.com/opim80/bfxmacro/main/main"
+
+; =====================
+; CHECK FOR UPDATES
+; =====================
+CheckForUpdates()
+{
+    global GitHubAPI, VersionFile, RawURL, ScriptFile, ScriptDir
+
+    local localVer := ""
+    if FileExist(VersionFile)
+        FileRead, localVer, %VersionFile%
+
+    http := ComObjCreate("WinHttp.WinHttpRequest.5.1")
+    http.Open("GET", GitHubAPI, false)
+    http.SetRequestHeader("User-Agent", "BFXMacroUpdater")
+    http.Send()
+
+    if (http.Status != 200)
+        return
+
+    json := http.ResponseText
+    commits := StrSplit(json, "sha"":""")
+    latestSHA := ""
+    if (commits.Length() > 1) {
+        latestSHA := SubStr(commits[2],1,40)
+    }
+
+    if (latestSHA != "" && latestSHA != localVer) {
+        MsgBox, 4,, A new update is available!`nDownload and install now?
+        IfMsgBox, Yes
+        {
+            http2 := ComObjCreate("WinHttp.WinHttpRequest.5.1")
+            http2.Open("GET", RawURL, false)
+            http2.SetRequestHeader("User-Agent", "BFXMacroUpdater")
+            http2.Send()
+            if (http2.Status == 200) {
+                newCode := http2.ResponseText
+
+                tmp := ScriptDir "\bfx_update_tmp.ahk"
+                FileDelete, %tmp%
+                FileAppend, %newCode%, %tmp%
+
+                updateScript :=
+                (
+                #SingleInstance Force
+                Sleep 500
+                Process, Close, %A_ScriptName%
+                FileCopy, %tmp%, %ScriptFile%, 1
+                Run, %ScriptFile%
+                FileDelete, %tmp%
+                ExitApp
+                )
+
+                updater := ScriptDir "\bfx_updater.ahk"
+                FileDelete, %updater%
+                FileAppend, %updateScript%, %updater%
+                Run, %updater%
+                ExitApp
+            }
+        }
+    }
+}
+
+; =====================
+; INITIAL SETUP
+; =====================
+Enabled := true
+InChat := false
+BuilderActive := false
+CurrentMode := ""
+
+Spam := {}
+keys := ["z","x","c","v","r","q","y"]
+for _, k in keys
+    Spam[k] := false
+
+SlotMap := {1:"FS",2:"Fruit",3:"Sword",4:"Gun"}
+Style := {FS:"", Fruit:"", Sword:"", Gun:""}
+
+; =====================
+; GUI MAIN
+; =====================
+Gui, Font, s9, Segoe UI
+Gui, Add, Text, x10 y10 w120, Config:
+Gui, Add, DropDownList, x60 y8 w140 vConfigList
+Gui, Add, Button, x210 y7 w50 gSaveConfig, Save
+Gui, Add, Button, x265 y7 w50 gLoadConfig, Load
+
+Gui, Add, GroupBox, x10 y40 w140 h160, Moves
+Gui, Add, Checkbox, x25 y65 vZMove gToggle, Z
+Gui, Add, Checkbox, x25 y90 vXMove gToggle, X
+Gui, Add, Checkbox, x25 y115 vCMove gToggle, C
+Gui, Add, Checkbox, x25 y140 vVMove gToggle, V
+
+Gui, Add, GroupBox, x170 y40 w200 h160, Addons
+Gui, Add, Checkbox, x185 y65 vChatDetect gToggle, Chat Detection
+Gui, Add, Checkbox, x185 y90 vRobloxOnly gToggle, Roblox Only
+Gui, Add, Checkbox, x185 y115 vSoru gToggle, Soru (R Spam)
+Gui, Add, Checkbox, x185 y140 vDash gToggle, Dash (Q Spam)
+Gui, Add, Checkbox, x185 y165 vRace gToggle, Race V4 (Y Spam)
+
+Gui, Add, Button, x10 y210 w120 gOpenBuilder, Builder
+Gui, Add, Button, x140 y210 w120 Disabled, Advanced Builder
+Gui, Add, Checkbox, x270 y214 vBuilderActive gToggle, Builder Active
+
+Gui, Add, Text, x10 y240 w360 Center vModeIndicator, Mode: None
+
+Gui, Show, w390 h270, BFX Macro
+return
+
+; =====================
+; TOGGLE HANDLER
+; =====================
+Toggle:
+Gui, Submit, NoHide
+Spam["z"] := ZMove
+Spam["x"] := XMove
+Spam["c"] := CMove
+Spam["v"] := VMove
+Spam["r"] := Soru
+Spam["q"] := Dash
+Spam["y"] := Race
+return
+
+; =====================
+; NORMAL SPAM
+; =====================
+~z::HandleKey("z")
+~x::HandleKey("x")
+~c::HandleKey("c")
+~v::HandleKey("v")
+~r::HandleKey("r")
+~q::HandleKey("q")
+~y::HandleKey("y")
+
+HandleKey(key) {
+    global BuilderActive
+    if (BuilderActive)
+        BuilderSpam(key)
+    else
+        NormalSpam(key)
+}
+
+NormalSpam(key) {
+    global Enabled, Spam, InChat, RobloxOnly
+    if (!Enabled || !Spam[key] || InChat)
+        return
+    if (RobloxOnly && !WinActive("ahk_exe RobloxPlayerBeta.exe"))
+        return
+
+    while GetKeyState(key,"P") {
+        Send, {%key%}
+        Sleep, 30
+    }
+}
+
+BuilderSpam(key) {
+    global Enabled, InChat, RobloxOnly
+    if (!Enabled || InChat)
+        return
+    if (RobloxOnly && !WinActive("ahk_exe RobloxPlayerBeta.exe"))
+        return
+
+    while GetKeyState(key,"P") {
+        Send, {%key%}
+        Sleep, 30
+    }
+}
+
+; =====================
+; SLOT HOTKEYS
+; =====================
+~1::SetMode(1)
+~2::SetMode(2)
+~3::SetMode(3)
+~4::SetMode(4)
+
+SetMode(n) {
+    global BuilderActive, SlotMap, CurrentMode
+    if (!BuilderActive)
+        return
+    CurrentMode := SlotMap[n]
+    GuiControl,, ModeIndicator, Mode: %CurrentMode%
+}
+
+; =====================
+; CHAT DETECTION
+; =====================
+~/::
+Gui, Submit, NoHide
+if (ChatDetect)
+    InChat := true
+return
+
+~Enter::
+~Esc::
+InChat := false
+return
+
+; =====================
+; DISABLE HOTKEY
+; =====================
+F8::Enabled := !Enabled
+
+; =====================
+; BUILDER UI
+; =====================
+OpenBuilder:
+Gui, Builder:New
+Gui, Builder:Font, s9, Segoe UI
+Gui, Builder:Add, Text, w300 Center,
+(
+This builder lets your macros change
+based on what you're holding.
+)
+Gui, Builder:Add, Button, w80 gBuilderNext, Next
+Gui, Builder:Show
+return
+
+BuilderNext:
+Gui, Builder:Destroy
+Goto BuilderSlots
+
+BuilderSlots:
+Gui, Builder2:New
+Loop 4
+    Gui, Builder2:Add, DropDownList, vSlot%A_Index%, Fighting Style|Fruit|Sword|Gun
+Gui, Builder2:Add, Button, gBuilderSkip, Skip
+Gui, Builder2:Add, Button, vDoneBtn Disabled gBuilderConfirm, Done
+Gui, Builder2:Show
+SetTimer, CheckSlots, 200
+return
+
+CheckSlots:
+assigned := {}
+complete := true
+Loop 4 {
+    GuiControlGet, v,, Slot%A_Index%
+    if (v = "" || assigned.HasKey(v))
+        complete := false
+    else
+        assigned[v] := true
+}
+if (complete)
+    GuiControl, Enable, DoneBtn
+else
+    GuiControl, Disable, DoneBtn
+return
+
+BuilderSkip:
+SlotMap := {1:"FS",2:"Fruit",3:"Sword",4:"Gun"}
+Gui, Builder2:Destroy
+Goto BuilderStyles
+
+BuilderConfirm:
+Loop 4 {
+    GuiControlGet, v,, Slot%A_Index%
+    SlotMap[A_Index] := (v="Fighting Style"?"FS":v)
+}
+Gui, Builder2:Destroy
+Goto BuilderStyles
+
+BuilderStyles:
+Gui, Builder3:New
+Gui, Builder3:Add, DropDownList, vFS, Sanguine Art|Godhuman|Dragon Talon|Electric Claw
+Gui, Builder3:Add, DropDownList, vFruit, Rocket|Spin|Blade|Spring|Bomb|Smoke|Spike|Flame|Ice|Sand|Dark|Eagle|Diamond|Light|Rubber|Ghost|Magma|Quake|Buddha|Love|Creation|Spider|Sound|Phoenix|Portal|Lightning|Pain|Blizzard|Gravity|Mammoth|T-Rex|Dough|Shadow|Venom|Gas|Spirit|Tiger|Yeti|Kitsune|Control|Dragon
+Gui, Builder3:Add, DropDownList, vSword, True Triple Katana
+Gui, Builder3:Add, DropDownList, vGun, Acidium Rifle|Kabucha|Venom Bow|Magma Blaster
+Gui, Builder3:Add, Button, gBuilderFinish, OK
+Gui, Builder3:Show
+return
+
+BuilderFinish:
+Gui, Builder3:Submit
+Style.FS := FS
+Style.Fruit := Fruit
+Style.Sword := Sword
+Style.Gun := Gun
+Gui, Builder3:Destroy
+return
+
+; =====================
+; SAVE / LOAD (empty placeholders)
+; =====================
+SaveConfig:
+return
+LoadConfig:
+return
